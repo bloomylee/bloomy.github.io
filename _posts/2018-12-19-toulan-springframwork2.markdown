@@ -12,7 +12,7 @@ tags:
   - 框架
 ---
 
->  此处分析居于spring 3.2.18源代码。
+>  此处分析居于spring 3.2.18源代码。spring boot分析居于spring 5.x版本。
 
 不知大家没有对照着上一篇文章描述到的非spring boot方式启动堆栈信息进行调试。从[FrameWorkServlet]()中的[initWebApplicationContext]()里的函数也很重要，涉及到了创建了[ApplicationContext]()实例、设置[Environment]()、[ConfigLocation]()等操作。
 
