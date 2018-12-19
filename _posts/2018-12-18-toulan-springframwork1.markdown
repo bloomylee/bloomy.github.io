@@ -1,15 +1,16 @@
----
+﻿---
 layout: post
-title: " 戒懒系列（一） | SpringFrameWork中的ApplicationContext"
+title: " 戒懒系列（一）  SpringFrameWork中的ApplicationContext"
 subtitle: ""
 author: "bloomy"
 header-img: "img/post-bg-infinity.jpg"
+date:       2018-12-18
 header-mask: 0.3
-mathjax: true
 tags:
-  - spring framework
+  - spring
   - 框架
 ---
+
 
 spring boot、spring cloud的出现，减少了很多项目的部署的复杂度、更加方便的集成和使用第三方功能模块。那些繁琐的配置大部分被spring 框架帮忙做了。相关介绍详见spring官方网站。
 
