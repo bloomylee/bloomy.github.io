@@ -210,19 +210,67 @@ public BeanDefinition parseCustomElement(Element ele, BeanDefinition containingB
 	}
 ~~~
 
-this.readerContext.getNamespaceHandlerResolver()获取到如图所示的数据：
+this.readerContext.getNamespaceHandlerResolver()获取到DefaultNamespaceHandlerResolver类的对象，然后调用resolve()。
+
+~~~java
+//DefaultNamespaceHandlerResolver.java
+public NamespaceHandler resolve(String namespaceUri) {
+		Map<String, Object> handlerMappings = getHandlerMappings();
+		Object handlerOrClassName = handlerMappings.get(namespaceUri);
+		if (handlerOrClassName == null) {
+			return null;
+		}
+		else if (handlerOrClassName instanceof NamespaceHandler) {
+			return (NamespaceHandler) handlerOrClassName;
+		}
+		else {
+			String className = (String) handlerOrClassName;
+			Class<?> handlerClass = ClassUtils.forName(className, this.classLoader);
+				if (!NamespaceHandler.class.isAssignableFrom(handlerClass)) {
+					throw new FatalBeanException("Class [" + className + "] for namespace [" + namespaceUri +
+							"] does not implement the [" + NamespaceHandler.class.getName() + "] interface");
+				}
+				NamespaceHandler namespaceHandler = (NamespaceHandler) BeanUtils.instantiateClass(handlerClass);
+				namespaceHandler.init();
+				handlerMappings.put(namespaceUri, namespaceHandler);
+				return namespaceHandler;
+			}		
+	}
+~~~
+
+resolve()调用getHandlerMappings()，ClassUtils.forName动态加载getHandlerMappings()函数返回的数据并且实例化对象，namespaceHandler.init()初始化或者自定义对注解的解析类。参见NamespaceHandlerSupport的子类、NamespaceHandler接口的实现。
+
+~~~java
+private Map<String, Object> getHandlerMappings() {
+......
+......
+Properties mappings =				PropertiesLoaderUtils.loadAllProperties(this.handlerMappingsLocation, this.classLoader);
+~~~
+
+NacosNamespaceHandler就是自定义的NamespaceHandler实现类，扩展自定义解析类。
+
+~~~java
+public class NacosNamespaceHandler extends NamespaceHandlerSupport {
+
+    @Override
+    public void init() {
+        registerBeanDefinitionParser("annotation-driven", new NacosAnnotationDrivenBeanDefinitionParser());
+        registerBeanDefinitionParser("global-properties", new GlobalNacosPropertiesBeanDefinitionParser());
+        registerBeanDefinitionParser("property-source", new NacosPropertySourceBeanDefinitionParser());
+    }
+}
+~~~
+
+PropertiesLoaderUtils.loadAllProperties函数加载解析加载、解析META-INFO/spring.handlers文件。getHandlerMappings()函数返回如图所示的数据：
 
 ![img](/img/spring/2/handler.png)
 
-所有数据其实是从META-INF/spring.handlers文件中加载的。
-
-接下来handler.parse函数调用findParserForElement函数根据参数找到对应的解析类，相关解析类都实现了 [BeanDefinitionParser]()接口，很多很多解析类。这里就不上图了。找到对应的解析类后，在继续调用具体parse方法的实现类型。
+接下来parseCustomElement函数中handler.parse函数调用findParserForElement函数根据参数找到对应的解析类，findParserForElement函数中 this.parsers 保存的就是NamespaceHandler实现类中init()函数调用registerBeanDefinitionParser注册的解析器。 相关解析类都实现了 [BeanDefinitionParser]()接口，很多很多解析类。这里就不上图了。找到对应的解析类后，在继续调用具体parse方法的实现类型。
 
 ~~~java
 //BeanDefinitionParser.java
 public interface BeanDefinitionParser {
 	BeanDefinition parse(Element element, ParserContext parserContext);
-
 }
 ~~~
 
@@ -230,7 +278,256 @@ public interface BeanDefinitionParser {
 //NamespaceHandlerSupport.java
 public BeanDefinition parse(Element element, ParserContext parserContext) {
 		return findParserForElement(element, parserContext).parse(element, parserContext);
+}
+
+private BeanDefinitionParser findParserForElement(Element element, ParserContext parserContext) {
+		String localName = parserContext.getDelegate().getLocalName(element);
+		BeanDefinitionParser parser = this.parsers.get(localName);
+		if (parser == null) {
+			parserContext.getReaderContext().fatal(
+					"Cannot locate BeanDefinitionParser for element [" + localName + "]", element);
+		}
+		return parser;
+}
+~~~
+
+### AnnotationConfigBeanDefinitionParser类中parse做了些什么？
+
+~~~java
+//AnnotationConfigBeanDefinitionParser.java
+
+public BeanDefinition parse(Element element, ParserContext parserContext) {
+		Object source = parserContext.extractSource(element);
+
+		// Obtain bean definitions for all relevant BeanPostProcessors.
+		Set<BeanDefinitionHolder> processorDefinitions =
+				AnnotationConfigUtils.registerAnnotationConfigProcessors(parserContext.getRegistry(), source);
+
+		// Register component for the surrounding <context:annotation-config> element.
+		CompositeComponentDefinition compDefinition = new CompositeComponentDefinition(element.getTagName(), source);
+		parserContext.pushContainingComponent(compDefinition);
+
+		// Nest the concrete beans in the surrounding component.
+		for (BeanDefinitionHolder processorDefinition : processorDefinitions) {
+			parserContext.registerComponent(new BeanComponentDefinition(processorDefinition));
+		}
+
+		// Finally register the composite component.
+		parserContext.popAndRegisterContainingComponent();
+
+		return null;
 	}
 ~~~
 
-在BeanDefinitionParser接口的多个实现类中有实现registerComponents方法。这个方法是干什么？
+AnnotationConfigUtils.registerAnnotationConfigProcessors----->AnnotationConfigUtils.registerPostProcessor--->BeanDefinitionRegistry.registerBeanDefinition，创建BeanDefinition结构和注册到DefaultListableBeanFactory类的成员变量beanDefinitionMap中，后续使用。
+
+### invokeBeanFactoryPostProcessors过程
+
+~~~java
+protected void invokeBeanFactoryPostProcessors(ConfigurableListableBeanFactory beanFactory) {
+    ........
+    ........
+        
+    Map<String, BeanDefinitionRegistryPostProcessor> beanMap =
+					beanFactory.getBeansOfType(BeanDefinitionRegistryPostProcessor.class, true, false);
+			List<BeanDefinitionRegistryPostProcessor> registryPostProcessorBeans =
+					new ArrayList<BeanDefinitionRegistryPostProcessor>(beanMap.values());
+			OrderComparator.sort(registryPostProcessorBeans);
+			for (BeanDefinitionRegistryPostProcessor postProcessor : registryPostProcessorBeans) {
+				postProcessor.postProcessBeanDefinitionRegistry(registry);
+			}
+			invokeBeanFactoryPostProcessors(registryPostProcessors, beanFactory);
+			invokeBeanFactoryPostProcessors(registryPostProcessorBeans, beanFactory);
+			invokeBeanFactoryPostProcessors(regularPostProcessors, beanFactory);
+			processedBeans.addAll(beanMap.keySet());
+		}
+		else {
+			// Invoke factory processors registered with the context instance.
+			invokeBeanFactoryPostProcessors(getBeanFactoryPostProcessors(), beanFactory);
+		}
+
+		// Do not initialize FactoryBeans here: We need to leave all regular beans
+		// uninitialized to let the bean factory post-processors apply to them!
+		String[] postProcessorNames =
+				beanFactory.getBeanNamesForType(BeanFactoryPostProcessor.class, true, false);
+
+		// Separate between BeanFactoryPostProcessors that implement PriorityOrdered,
+		// Ordered, and the rest.
+		List<BeanFactoryPostProcessor> priorityOrderedPostProcessors = new ArrayList<BeanFactoryPostProcessor>();
+		List<String> orderedPostProcessorNames = new ArrayList<String>();
+		List<String> nonOrderedPostProcessorNames = new ArrayList<String>();
+		for (String ppName : postProcessorNames) {
+			if (processedBeans.contains(ppName)) {
+				// skip - already processed in first phase above
+			}
+			else if (isTypeMatch(ppName, PriorityOrdered.class)) {
+				priorityOrderedPostProcessors.add(beanFactory.getBean(ppName, BeanFactoryPostProcessor.class));
+			}
+			else if (isTypeMatch(ppName, Ordered.class)) {
+				orderedPostProcessorNames.add(ppName);
+			}
+			else {
+				nonOrderedPostProcessorNames.add(ppName);
+			}
+		}
+
+		// First, invoke the BeanFactoryPostProcessors that implement PriorityOrdered.
+		OrderComparator.sort(priorityOrderedPostProcessors);
+		invokeBeanFactoryPostProcessors(priorityOrderedPostProcessors, beanFactory);
+
+		// Next, invoke the BeanFactoryPostProcessors that implement Ordered.
+		List<BeanFactoryPostProcessor> orderedPostProcessors = new ArrayList<BeanFactoryPostProcessor>();
+		for (String postProcessorName : orderedPostProcessorNames) {
+			orderedPostProcessors.add(getBean(postProcessorName, BeanFactoryPostProcessor.class));
+		}
+		OrderComparator.sort(orderedPostProcessors);
+		invokeBeanFactoryPostProcessors(orderedPostProcessors, beanFactory);
+
+		// Finally, invoke all other BeanFactoryPostProcessors.
+		List<BeanFactoryPostProcessor> nonOrderedPostProcessors = new ArrayList<BeanFactoryPostProcessor>();
+		for (String postProcessorName : nonOrderedPostProcessorNames) {
+			nonOrderedPostProcessors.add(getBean(postProcessorName, BeanFactoryPostProcessor.class));
+		}
+		invokeBeanFactoryPostProcessors(nonOrderedPostProcessors, beanFactory);
+}
+~~~
+
+大家还记得之前BeanDefinitionParser接口其中一个实现类AnnotationConfigBeanDefinitionParser的parse方法？往上翻一下，注意AnnotationConfigUtils.registerAnnotationConfigProcessors函数。里面多次调用了registerPostProcessor上面也说了，封装BeanDefinition结构，保存到beanMap里面。
+
+~~~java
+//AnnotationConfigUtils.java
+public static Set<BeanDefinitionHolder> registerAnnotationConfigProcessors(
+			BeanDefinitionRegistry registry, Object source) {
+
+		Set<BeanDefinitionHolder> beanDefs = new LinkedHashSet<BeanDefinitionHolder>(4);
+
+		if (!registry.containsBeanDefinition(CONFIGURATION_ANNOTATION_PROCESSOR_BEAN_NAME)) {
+			RootBeanDefinition def = new RootBeanDefinition(ConfigurationClassPostProcessor.class);
+			def.setSource(source);
+			beanDefs.add(registerPostProcessor(registry, def, CONFIGURATION_ANNOTATION_PROCESSOR_BEAN_NAME));
+		}
+
+		if (!registry.containsBeanDefinition(AUTOWIRED_ANNOTATION_PROCESSOR_BEAN_NAME)) {
+			RootBeanDefinition def = new RootBeanDefinition(AutowiredAnnotationBeanPostProcessor.class);
+			def.setSource(source);
+			beanDefs.add(registerPostProcessor(registry, def, AUTOWIRED_ANNOTATION_PROCESSOR_BEAN_NAME));
+		}
+
+		if (!registry.containsBeanDefinition(REQUIRED_ANNOTATION_PROCESSOR_BEAN_NAME)) {
+			RootBeanDefinition def = new RootBeanDefinition(RequiredAnnotationBeanPostProcessor.class);
+			def.setSource(source);
+			beanDefs.add(registerPostProcessor(registry, def, REQUIRED_ANNOTATION_PROCESSOR_BEAN_NAME));
+		}
+
+		// Check for JSR-250 support, and if present add the CommonAnnotationBeanPostProcessor.
+		if (jsr250Present && !registry.containsBeanDefinition(COMMON_ANNOTATION_PROCESSOR_BEAN_NAME)) {
+			RootBeanDefinition def = new RootBeanDefinition(CommonAnnotationBeanPostProcessor.class);
+			def.setSource(source);
+			beanDefs.add(registerPostProcessor(registry, def, COMMON_ANNOTATION_PROCESSOR_BEAN_NAME));
+		}
+
+		// Check for JPA support, and if present add the PersistenceAnnotationBeanPostProcessor.
+		if (jpaPresent && !registry.containsBeanDefinition(PERSISTENCE_ANNOTATION_PROCESSOR_BEAN_NAME)) {
+			RootBeanDefinition def = new RootBeanDefinition();
+			try {
+				def.setBeanClass(ClassUtils.forName(PERSISTENCE_ANNOTATION_PROCESSOR_CLASS_NAME,
+						AnnotationConfigUtils.class.getClassLoader()));
+			}
+			catch (ClassNotFoundException ex) {
+				throw new IllegalStateException(
+						"Cannot load optional framework class: " + PERSISTENCE_ANNOTATION_PROCESSOR_CLASS_NAME, ex);
+			}
+			def.setSource(source);
+			beanDefs.add(registerPostProcessor(registry, def, PERSISTENCE_ANNOTATION_PROCESSOR_BEAN_NAME));
+		}
+
+		return beanDefs;
+	}
+
+	private static BeanDefinitionHolder registerPostProcessor(
+			BeanDefinitionRegistry registry, RootBeanDefinition definition, String beanName) {
+
+		definition.setRole(BeanDefinition.ROLE_INFRASTRUCTURE);
+		registry.registerBeanDefinition(beanName, definition);
+		return new BeanDefinitionHolder(definition, beanName);
+	}
+~~~
+
+beanFactory.getBeanNamesForType(BeanFactoryPostProcessor.class, true, false)函数从beanDefinitionMap里面获取到指定类型的对象。这里首先获取到ConfigurationClassPostProcessor类
+
+~~~java
+public class ConfigurationClassPostProcessor implements BeanDefinitionRegistryPostProcessor,
+		Ordered, ResourceLoaderAware, BeanClassLoaderAware, EnvironmentAware {
+            
+   public int getOrder() {
+		return Ordered.HIGHEST_PRECEDENCE;
+        //-2147483648 越小排序越靠前
+	}
+}
+~~~
+
+~~~java
+//ConfigurationClassPostProcessor.java
+public void postProcessBeanDefinitionRegistry(BeanDefinitionRegistry registry) {
+		RootBeanDefinition iabpp = new RootBeanDefinition(ImportAwareBeanPostProcessor.class);
+		iabpp.setRole(BeanDefinition.ROLE_INFRASTRUCTURE);
+		registry.registerBeanDefinition(IMPORT_AWARE_PROCESSOR_BEAN_NAME, iabpp);
+
+		int registryId = System.identityHashCode(registry);
+		if (this.registriesPostProcessed.contains(registryId)) {
+			throw new IllegalStateException(
+					"postProcessBeanDefinitionRegistry already called for this post-processor against " + registry);
+		}
+		if (this.factoriesPostProcessed.contains(registryId)) {
+			throw new IllegalStateException(
+					"postProcessBeanFactory already called for this post-processor against " + registry);
+		}
+		this.registriesPostProcessed.add(registryId);
+
+		processConfigBeanDefinitions(registry);
+	}
+~~~
+
+postProcessBeanDefinitionRegistry添加ImportAwareBeanPostProcessor到beanDefinitionMap里面,然后调用 processConfigBeanDefinitions函数，判断是否beanDefinitionMap里面保存的BeanDefinition对象信息是否有@Configuration，@Component、@Bean注解，创建 ConfigurationClassParser对象对beanDefinitionMap里面的BeanDefinition信息做解析。很重要这个函数。
+
+~~~java
+//ConfigurationClassPostProcessor.java
+public void processConfigBeanDefinitions(BeanDefinitionRegistry registry) {
+    Set<BeanDefinitionHolder> configCandidates = new LinkedHashSet<BeanDefinitionHolder>();
+            for (String beanName : registry.getBeanDefinitionNames()) {
+                BeanDefinition beanDef = registry.getBeanDefinition(beanName);
+                if (ConfigurationClassUtils.checkConfigurationClassCandidate(beanDef, this.metadataReaderFactory)) {
+                    configCandidates.add(new BeanDefinitionHolder(beanDef, beanName));
+	......
+    ......
+}
+~~~
+
+创建ConfigurationClassParser parse对象，configCandidates容器里面保存有@Configuration、@Component和@Bean注解的BeanDefinition对象。根据不同的类型进行解析。
+
+~~~java
+//ConfigurationClassPostProcessor.java
+public void processConfigBeanDefinitions(BeanDefinitionRegistry registry) {
+    ConfigurationClassParser parser = new ConfigurationClassParser(
+                    this.metadataReaderFactory, this.problemReporter, this.environment,
+                    this.resourceLoader, this.componentScanBeanNameGenerator, registry);
+            for (BeanDefinitionHolder holder : configCandidates) {
+                BeanDefinition bd = holder.getBeanDefinition();
+                try {
+                    if (bd instanceof AbstractBeanDefinition && ((AbstractBeanDefinition) bd).hasBeanClass()) {
+                        parser.parse(((AbstractBeanDefinition) bd).getBeanClass(), holder.getBeanName());
+                    }
+                    else {
+                        parser.parse(bd.getBeanClassName(), holder.getBeanName());
+                    }
+                }
+                catch (IOException ex) {
+                    throw new BeanDefinitionStoreException("Failed to load bean class: " + bd.getBeanClassName(), ex);
+                }
+            }
+}
+~~~
+
+写在此片最后，parse.parse循环解析上面已保存并且符合条件的类型BeanDefinition对象。重头戏都在这个函数里面。绝对是核心函数。绝对值得投入时间弄懂流程。
+
+spring 提供了很多工具类，不需要重复造轮子，总有你用得到的。ConfigurationClassUtils、ReflectionUtils、AnnotationConfigUtils、BeanUtils是不是看名字就能猜到怎么用了。
