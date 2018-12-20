@@ -392,7 +392,7 @@ protected void invokeBeanFactoryPostProcessors(ConfigurableListableBeanFactory b
 }
 ~~~
 
-大家还记得之前BeanDefinitionParser接口其中一个实现类AnnotationConfigBeanDefinitionParser的parse方法？往上翻一下，注意AnnotationConfigUtils.registerAnnotationConfigProcessors函数。里面多次调用了registerPostProcessor上面也说了，封装BeanDefinition结构，保存到beanMap里面。
+大家还记得之前BeanDefinitionParser接口其中一个实现类AnnotationConfigBeanDefinitionParser的parse方法？往上翻一下，注意AnnotationConfigUtils.registerAnnotationConfigProcessors函数。里面多次调用了registerPostProcessor上面也说了，封装BeanDefinition结构，保存到beanMap里面。后续排序后，按照顺序@PriorityOrdered-->@Ordered--->没有这两个注解的类分别处理。
 
 ~~~java
 //AnnotationConfigUtils.java
