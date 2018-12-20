@@ -3,7 +3,9 @@ layout: post
 title: " 戒懒系列（二）  AbstractApplicationContext中的refresh"
 subtitle: ""
 author: "bloomy"
-header-img: "img/post-bg-infinity.jpg"
+header-img: "img/post-bg-css.jpg"
+header-img-credit: "@WebdesignerDepot"
+header-img-credit-href: "medium.com/@WebdesignerDepot/poll-should-css-become-more-like-a-programming-language-c74eb26a4270"
 date:       2018-12-19
 header-mask: 0.4
 tags:
@@ -531,3 +533,5 @@ public void processConfigBeanDefinitions(BeanDefinitionRegistry registry) {
 写在此片最后，parse.parse循环解析上面已保存并且符合条件的类型BeanDefinition对象。重头戏都在这个函数里面。绝对是核心函数。绝对值得投入时间弄懂流程。
 
 spring 提供了很多工具类，不需要重复造轮子，总有你用得到的。ConfigurationClassUtils、ReflectionUtils、AnnotationConfigUtils、BeanUtils是不是看名字就能猜到怎么用了。
+
+未完........
