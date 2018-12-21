@@ -120,9 +120,7 @@ private int age; //age=2
 
 >  obtainFreshBeanFactory流程
 
-refresh过程中 obtainFreshBeanFactory经过一系列的调用，会设置FrameworkServlet类里面 contextConfigLocation 成员的值，contextConfigLocation=WEB-INF/dispatcherServlet-servlet.xml。
-
-从web.xml中解析出servlet-name字段值（解析过程是在tomcat中完成的，调用了StandardWrapper.getServletConfig()返回），然后调用getDefaultConfigLocations()函数拼接字符串值。
+refresh过程中 obtainFreshBeanFactory经过一系列的调用，会设置FrameworkServlet类里面 contextConfigLocation 成员的值。从web.xml中解析出servlet-name字段值（解析过程是在tomcat中完成的，调用了StandardWrapper.getServletConfig())，然后调用getDefaultConfigLocations()函数拼接字符串值。servlet-name定义如下。
 
 ~~~xml
 <servlet>
@@ -132,7 +130,7 @@ refresh过程中 obtainFreshBeanFactory经过一系列的调用，会设置Frame
 </servlet>
 ~~~
 
-详细过程参考如下函数：
+getDefaultConfigLocations拼接路径后contextConfigLocation=WEB-INF/dispatcherServlet-servlet.xml。
 
 ~~~java
 //XmlWebApplicationContext.java
@@ -157,7 +155,7 @@ protected String[] getDefaultConfigLocations() {
 }
 ~~~
 
-执行到loadBeanDefinitions()函数，循环加载WEB-INF/web.xml里面配置的servlet-name上面已经分析完。
+XmlWebApplicationContext里的loadBeanDefinitions函数进过一些列执行最终会执行到XmlBeanDefinitionReader里的loadBeanDefinitions()函数，循环加载WEB-INF/web.xml里面配置的servlet-name上面已有分析。
 
 ~~~java
 //XmlWebApplicationContext.java
@@ -170,6 +168,10 @@ protected void loadBeanDefinitions(XmlBeanDefinitionReader reader) throws IOExce
 		}
 	}
 ~~~
+
+调用链如图所示：
+
+![img](/img/spring/2/use.png)
 
 reader.loadBeanDefinitions(configLocation)函数会加载解析dispatcherServlet-servlet.xml文件
 
